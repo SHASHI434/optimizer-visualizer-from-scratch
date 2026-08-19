@@ -8,8 +8,7 @@ This project implements and visualizes 7 core optimization algorithms from first
 
 ## 🚀 Live Demo & Repository
 * **GitHub Repository:** https://github.com/SHASHI434/optimizer-visualizer-from-scratch
-* **Live App:** Deploy on Streamlit Community Cloud and paste your live link here
-
+* **Live App:** https://optimizer-from-scratch.streamlit.app/
 ---
 
 ## 📌 Key Features
