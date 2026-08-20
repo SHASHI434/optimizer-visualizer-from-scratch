@@ -16,7 +16,7 @@ st.set_page_config(page_title="Optimizer Visualizer: SGD to AdamW", layout="wide
 
 class Optimizer:
     def __init__(self, lr=0.01):
-        self.lr = max(1e-6, lr)  # Input validation
+        self.lr = max(1e-6, lr)
     def step(self, params, grads):
         raise NotImplementedError
 
@@ -180,33 +180,33 @@ with st.sidebar:
     st.markdown("**Defaults:** $\eta=0.01$, $\\beta=0.9$, $\\beta_1=0.9$, $\\beta_2=0.999$, $\\lambda=0.001$")
 
 # =========================================================
-# MODULE 2: PART A - 2D LOSS SURFACE PLAYGROUND
+# MODULE 2: PART A - 2D LOSS SURFACE WITH PLAY/PAUSE CONTROLS
 # =========================================================
 
 with tab1:
-    col_ctrl, col_view = st.columns([1, 3])
+    st.subheader("🎯 2D Anisotropic Loss Surface Playground")
     
-    with col_ctrl:
-        st.subheader("Surface Controls")
-        loss_choice = st.selectbox(
-            "Loss Surface",
-            ["L1: x² + 10y²", "L2: x² + 50y² (Default)", "L3: x² + 100y²", "L4: x² + 1000y²"],
-            index=1
-        )
-        k_val = {"L1: x² + 10y²": 10, "L2: x² + 50y² (Default)": 50, "L3: x² + 100y²": 100, "L4: x² + 1000y²": 1000}[loss_choice]
-        
-        selected_optims = st.multiselect(
-            "Optimizers to Compare",
-            list(COLORS.keys()),
-            default=["SGD", "SGD + Momentum", "Adam"]
-        )
-        
-        init_x = st.number_input("Initial x₀", value=8.0)
-        init_y = st.number_input("Initial y₀", value=8.0)
-        iterations = st.slider("Iterations", min_value=10, max_value=500, value=150, step=10)
-        
-        animate = st.checkbox("▶ Live Animation Mode", value=False)
-        anim_speed = st.slider("Anim Speed (fps delay)", 0.01, 0.2, 0.03) if animate else 0
+    with st.expander("🛠️ Surface & Trajectory Controls (Click to expand/collapse)", expanded=True):
+        c_opt1, c_opt2 = st.columns([1.5, 1.5])
+        with c_opt1:
+            loss_choice = st.selectbox(
+                "Loss Surface (Condition Number)",
+                ["L1: x² + 10y²", "L2: x² + 50y² (Default)", "L3: x² + 100y²", "L4: x² + 1000y²"],
+                index=1
+            )
+            k_val = {"L1: x² + 10y²": 10, "L2: x² + 50y² (Default)": 50, "L3: x² + 100y²": 100, "L4: x² + 1000y²": 1000}[loss_choice]
+            
+            selected_optims = st.multiselect(
+                "Optimizers to Compare",
+                list(COLORS.keys()),
+                default=["SGD", "SGD + Momentum", "Adam"]
+            )
+            
+        with c_opt2:
+            c_pos1, c_pos2 = st.columns(2)
+            init_x = c_pos1.number_input("Initial Coordinate x₀", value=8.0, step=0.5)
+            init_y = c_pos2.number_input("Initial Coordinate y₀", value=8.0, step=0.5)
+            iterations = st.slider("Optimization Iterations", min_value=10, max_value=500, value=150, step=10)
 
     # Compute Trajectories
     trajectories = {}
@@ -236,43 +236,180 @@ with tab1:
         trajectories[opt_name] = traj
         loss_histories[opt_name] = losses
 
-    with col_view:
-        plot_placeholder = st.empty()
-        
-        def render_plot(step_limit):
-            fig = make_subplots(rows=1, cols=2, subplot_titles=("Contour Map & Trajectory", "Loss vs. Iteration"))
-            x_max = max(10.0, abs(init_x) + 2)
-            y_max = max(10.0, abs(init_y) + 2)
-            x_grid = np.linspace(-x_max, x_max, 100)
-            y_grid = np.linspace(-y_max, y_max, 100)
-            X_mesh, Y_mesh = np.meshgrid(x_grid, y_grid)
-            Z_mesh = X_mesh**2 + k_val * (Y_mesh**2)
+    plotly_config = {
+        'scrollZoom': True,
+        'displayModeBar': True,
+        'displaylogo': False
+    }
 
-            fig.add_trace(go.Contour(z=Z_mesh, x=x_grid, y=y_grid, colorscale='Blues', opacity=0.4, showscale=False), row=1, col=1)
-            fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='star', size=14, color='gold', line=dict(color='black', width=1)), name='Minimum (0,0)'), row=1, col=1)
+    # Step sampling for smooth animation frames
+    frame_step = max(1, iterations // 60)
+    frame_indices = list(range(1, iterations + 1, frame_step))
+    if iterations not in frame_indices:
+        frame_indices.append(iterations)
 
-            for name in selected_optims:
-                pts = np.array(trajectories[name][:step_limit])
-                l_pts = loss_histories[name][:step_limit]
-                c = COLORS[name]
-                fig.add_trace(go.Scatter(x=pts[:, 0], y=pts[:, 1], mode='lines+markers', marker=dict(size=4), line=dict(color=c, width=2), name=name), row=1, col=1)
-                fig.add_trace(go.Scatter(y=l_pts, mode='lines', line=dict(color=c, width=2), name=name, showlegend=False), row=1, col=2)
+    # 1. BUILD ANIMATED CONTOUR MAP
+    x_max = max(10.0, abs(init_x) + 2)
+    y_max = max(10.0, abs(init_y) + 2)
+    x_grid = np.linspace(-x_max, x_max, 120)
+    y_grid = np.linspace(-y_max, y_max, 120)
+    X_mesh, Y_mesh = np.meshgrid(x_grid, y_grid)
+    Z_mesh = X_mesh**2 + k_val * (Y_mesh**2)
 
-            fig.update_xaxes(title_text="x", row=1, col=1)
-            fig.update_yaxes(title_text="y", row=1, col=1)
-            fig.update_xaxes(title_text="Iteration", row=1, col=2)
-            fig.update_yaxes(title_text="Loss L(θ)", type="log", row=1, col=2)
-            fig.update_layout(height=520, margin=dict(l=20, r=20, t=40, b=20))
-            return fig
+    fig_contour = go.Figure()
 
-        if animate:
-            step_stride = max(1, iterations // 30)
-            for step in range(2, iterations + 1, step_stride):
-                plot_placeholder.plotly_chart(render_plot(step), use_container_width=True)
-                time.sleep(anim_speed)
-            plot_placeholder.plotly_chart(render_plot(iterations + 1), use_container_width=True)
-        else:
-            plot_placeholder.plotly_chart(render_plot(iterations + 1), use_container_width=True)
+    # Base Contour Background
+    fig_contour.add_trace(go.Contour(
+        z=Z_mesh, x=x_grid, y=y_grid,
+        colorscale='Blues', opacity=0.35, showscale=True,
+        colorbar=dict(title=dict(text="<b>Loss Value</b>", font=dict(color="white", size=12)), thickness=15)
+    ))
+    
+    # Global Minimum Marker
+    fig_contour.add_trace(go.Scatter(
+        x=[0], y=[0], mode='markers',
+        marker=dict(symbol='star', size=16, color='gold', line=dict(color='black', width=1.5)),
+        name='Global Min (0,0)'
+    ))
+
+    # Initial Traces (Frame 0)
+    for name in selected_optims:
+        pts = np.array(trajectories[name][:1])
+        c = COLORS[name]
+        fig_contour.add_trace(go.Scatter(
+            x=pts[:, 0], y=pts[:, 1],
+            mode='lines+markers',
+            marker=dict(size=6),
+            line=dict(color=c, width=2.5),
+            name=name
+        ))
+
+    # Frames for Contour Map Animation
+    contour_frames = []
+    for step in frame_indices:
+        frame_traces = [
+            go.Contour(z=Z_mesh, x=x_grid, y=y_grid, colorscale='Blues', opacity=0.35, showscale=True),
+            go.Scatter(x=[0], y=[0], mode='markers', marker=dict(symbol='star', size=16, color='gold'))
+        ]
+        for name in selected_optims:
+            pts = np.array(trajectories[name][:step+1])
+            c = COLORS[name]
+            frame_traces.append(go.Scatter(
+                x=pts[:, 0], y=pts[:, 1],
+                mode='lines+markers',
+                marker=dict(size=6),
+                line=dict(color=c, width=2.5),
+                name=name
+            ))
+        contour_frames.append(go.Frame(data=frame_traces, name=f"step_{step}"))
+
+    fig_contour.frames = contour_frames
+
+    # Setup Native Play/Pause Slider UI for Contour
+    fig_contour.update_layout(
+        title=dict(text=f"<b>Contour Trajectory Map ({loss_choice}) — Click Play to Animate</b>", font=dict(size=18, color="white")),
+        xaxis=dict(
+            title=dict(text="<b>Parameter: x (Flatter Dimension)</b>", font=dict(size=14, color="white")),
+            range=[-x_max, x_max], showgrid=True, gridcolor='rgba(255,255,255,0.15)', zeroline=True, zerolinecolor='white'
+        ),
+        yaxis=dict(
+            title=dict(text="<b>Parameter: y (High-Curvature Ravine)</b>", font=dict(size=14, color="white")),
+            range=[-y_max, y_max], showgrid=True, gridcolor='rgba(255,255,255,0.15)', zeroline=True, zerolinecolor='white'
+        ),
+        height=660,
+        margin=dict(l=70, r=40, t=60, b=100),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        updatemenus=[dict(
+            type="buttons",
+            showactive=False,
+            x=0.0, y=-0.18,
+            buttons=[
+                dict(label="▶ Play", method="animate", args=[None, dict(frame=dict(duration=60, redraw=True), fromcurrent=True, mode="immediate")]),
+                dict(label="⏸ Pause", method="animate", args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])
+            ]
+        )],
+        sliders=[dict(
+            active=0,
+            yanchor="top",
+            xanchor="left",
+            currentvalue=dict(font=dict(size=14, color="white"), prefix="Iteration Step: ", visible=True, xanchor="right"),
+            transition=dict(duration=30),
+            pad=dict(b=10, t=30),
+            len=0.88,
+            x=0.12, y=-0.14,
+            steps=[dict(args=[[f"step_{k}"], dict(mode="immediate", frame=dict(duration=0, redraw=True))], label=f"{k}", method="animate") for k in frame_indices]
+        )]
+    )
+
+    st.plotly_chart(fig_contour, use_container_width=True, config=plotly_config)
+
+    # 2. BUILD ANIMATED LOSS VS ITERATION CURVE
+    fig_loss = go.Figure()
+
+    for name in selected_optims:
+        l_pts = loss_histories[name][:1]
+        c = COLORS[name]
+        fig_loss.add_trace(go.Scatter(
+            x=[0], y=l_pts,
+            mode='lines+markers',
+            line=dict(color=c, width=2.5),
+            name=name
+        ))
+
+    loss_frames = []
+    for step in frame_indices:
+        frame_traces = []
+        for name in selected_optims:
+            l_pts = loss_histories[name][:step+1]
+            c = COLORS[name]
+            frame_traces.append(go.Scatter(
+                x=list(range(len(l_pts))),
+                y=l_pts,
+                mode='lines+markers',
+                marker=dict(size=4),
+                line=dict(color=c, width=2.5),
+                name=name
+            ))
+        loss_frames.append(go.Frame(data=frame_traces, name=f"loss_step_{step}"))
+
+    fig_loss.frames = loss_frames
+
+    fig_loss.update_layout(
+        title=dict(text="<b>Convergence Profile: Loss vs Iteration (Logarithmic Scale)</b>", font=dict(size=18, color="white")),
+        xaxis=dict(
+            title=dict(text="<b>Iteration Step (t)</b>", font=dict(size=14, color="white")),
+            range=[0, iterations], showgrid=True, gridcolor='rgba(255,255,255,0.15)'
+        ),
+        yaxis=dict(
+            title=dict(text="<b>Loss Value L(θ) [Log Scale]</b>", font=dict(size=14, color="white")),
+            type="log", showgrid=True, gridcolor='rgba(255,255,255,0.15)'
+        ),
+        height=540,
+        margin=dict(l=70, r=40, t=60, b=100),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        updatemenus=[dict(
+            type="buttons",
+            showactive=False,
+            x=0.0, y=-0.22,
+            buttons=[
+                dict(label="▶ Play", method="animate", args=[None, dict(frame=dict(duration=60, redraw=True), fromcurrent=True, mode="immediate")]),
+                dict(label="⏸ Pause", method="animate", args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])
+            ]
+        )],
+        sliders=[dict(
+            active=0,
+            yanchor="top",
+            xanchor="left",
+            currentvalue=dict(font=dict(size=14, color="white"), prefix="Iteration Step: ", visible=True, xanchor="right"),
+            transition=dict(duration=30),
+            pad=dict(b=10, t=30),
+            len=0.88,
+            x=0.12, y=-0.18,
+            steps=[dict(args=[[f"loss_step_{k}"], dict(mode="immediate", frame=dict(duration=0, redraw=True))], label=f"{k}", method="animate") for k in frame_indices]
+        )]
+    )
+
+    st.plotly_chart(fig_loss, use_container_width=True, config=plotly_config)
 
 # =========================================================
 # MODULE 3: PART B - NEURAL NETWORK TRAINING FROM SCRATCH
@@ -346,7 +483,7 @@ with tab2:
     c1.metric("Features", X_train.shape[1])
     c2.metric("Train Samples", X_train.shape[0])
     c3.metric("Test Samples", X_test.shape[0])
-    epochs = c4.slider("Epochs", 20, 200, 80, 10)
+    epochs = c4.slider("Epochs", 20, 300, 100, 10)
 
     col_batch1, col_batch2 = st.columns(2)
     with col_batch1:
@@ -448,41 +585,41 @@ with tab2:
                 "<b>Train Loss vs Epoch</b>", 
                 "<b>Test Loss vs Epoch</b>", 
                 "<b>Test Accuracy vs Epoch</b>", 
-                "<b>Effective LR (W1[0,0]) vs Epoch</b>"
+                "<b>Effective LR Scaling vs Epoch</b>"
             ),
-            vertical_spacing=0.18,
+            vertical_spacing=0.2,
             horizontal_spacing=0.12
         )
         
         for opt_name in selected_opts_nn:
             c = COLORS[opt_name]
             ep_axis = list(range(1, epochs + 1))
-            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['tr_loss'], mode='lines', line=dict(color=c, width=2), name=opt_name), row=1, col=1)
-            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['te_loss'], mode='lines', line=dict(color=c, width=2), showlegend=False), row=1, col=2)
-            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['te_acc'], mode='lines', line=dict(color=c, width=2), showlegend=False), row=2, col=1)
-            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['eff_lr'], mode='lines', line=dict(color=c, width=2), showlegend=False), row=2, col=2)
+            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['tr_loss'], mode='lines', line=dict(color=c, width=2.5), name=opt_name), row=1, col=1)
+            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['te_loss'], mode='lines', line=dict(color=c, width=2.5), showlegend=False), row=1, col=2)
+            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['te_acc'], mode='lines', line=dict(color=c, width=2.5), showlegend=False), row=2, col=1)
+            fig_nn.add_trace(go.Scatter(x=ep_axis, y=history[opt_name]['eff_lr'], mode='lines', line=dict(color=c, width=2.5), showlegend=False), row=2, col=2)
 
         for r in [1, 2]:
             for col_idx in [1, 2]:
-                fig_nn.update_xaxes(title=dict(text="<b>Epoch</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.2)', row=r, col=col_idx)
+                fig_nn.update_xaxes(title=dict(text="<b>Training Epoch</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.15)', row=r, col=col_idx)
 
-        fig_nn.update_yaxes(title=dict(text="<b>Training Loss (BCE)</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.2)', row=1, col=1)
-        fig_nn.update_yaxes(title=dict(text="<b>Test Loss (BCE)</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.2)', row=1, col=2)
-        fig_nn.update_yaxes(title=dict(text="<b>Test Accuracy (0 to 1)</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.2)', row=2, col=1)
-        fig_nn.update_yaxes(title=dict(text="<b>Effective LR (Scaling)</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.2)', row=2, col=2)
+        fig_nn.update_yaxes(title=dict(text="<b>Train Loss (BCE)</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.15)', row=1, col=1)
+        fig_nn.update_yaxes(title=dict(text="<b>Validation/Test Loss</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.15)', row=1, col=2)
+        fig_nn.update_yaxes(title=dict(text="<b>Classification Accuracy (0-1)</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.15)', row=2, col=1)
+        fig_nn.update_yaxes(title=dict(text="<b>Effective η Rate</b>", font=dict(size=12, color="#ffffff")), showgrid=True, gridcolor='rgba(255,255,255,0.15)', row=2, col=2)
 
         fig_nn.update_layout(
-            height=780,
+            height=850,
             margin=dict(l=80, r=40, t=60, b=80),
-            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5)
+            legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="center", x=0.5)
         )
-        st.plotly_chart(fig_nn, use_container_width=True)
+        st.plotly_chart(fig_nn, use_container_width=True, config=plotly_config)
 
         st.subheader("Comparison Table (B3)")
         st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
 
 # =========================================================
-# MODULE 4: THEORY & HOW-TO-USE GUIDE (A4 & Section 4)
+# MODULE 4: THEORY & HOW-TO-USE GUIDE
 # =========================================================
 with tab3:
     st.subheader("📖 How to Use This Tool")
@@ -490,7 +627,7 @@ with tab3:
     1. **Part A (2D Loss Surface):**
        - Choose an anisotropic loss surface ($L_1$ to $L_4$) to test different Hessian condition numbers.
        - Select multiple optimizers to compare their trajectory curves on the contour plot.
-       - Toggle **Live Animation Mode** to see them iterate step-by-step.
+       - Use the **▶ Play / ⏸ Pause** buttons or drag the timeline slider directly on the graph to inspect step-by-step optimization progress.
     2. **Part B (Neural Network Training):**
        - Train a from-scratch 3-layer MLP on the Breast Cancer dataset.
        - Select between **Full Batch** and **Mini-Batch** gradient descent.
